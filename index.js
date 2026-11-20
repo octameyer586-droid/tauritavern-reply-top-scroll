@@ -1,16 +1,19 @@
 // TauriTavern-compatible implementation with no imports from SillyTavern internals.
-// Starts one delayed top-scroll for each newly created assistant turn.
-// It does not observe scroll events, so manual scrolling is never interrupted.
+// Locates the actual scroll container and moves it to the newest assistant reply.
+// A short correction window handles TauriTavern's final layout update, then stops.
 
 let pollTimer = null;
 let retryTimer = null;
 let scrollTimer = null;
+let correctionTimer = null;
 let turnStarted = false;
 let settled = false;
 let lastAssistantNode = null;
+let correctionCount = 0;
 
 function getMessages() {
-    return [...document.querySelectorAll('#chat .mes, .mes')];
+    const scoped = [...document.querySelectorAll('#chat .mes')];
+    return scoped.length ? scoped : [...document.querySelectorAll('.mes')];
 }
 
 function getLatestMessage() {
@@ -26,35 +29,71 @@ function getLatestAssistant() {
     return latest;
 }
 
+function findScrollContainer(message) {
+    let element = message.parentElement;
+    while (element && element !== document.body) {
+        const style = getComputedStyle(element);
+        const scrollable = ['auto', 'scroll', 'overlay'].includes(style.overflowY);
+        if (scrollable && element.scrollHeight > element.clientHeight + 2) {
+            return element;
+        }
+        element = element.parentElement;
+    }
+    return document.scrollingElement || document.documentElement;
+}
+
+function moveReplyToTop(message) {
+    if (!message || !document.contains(message)) return;
+
+    const container = findScrollContainer(message);
+    const messageRect = message.getBoundingClientRect();
+
+    if (container === document.scrollingElement || container === document.documentElement) {
+        const top = messageRect.top + window.scrollY;
+        window.scrollTo({ top: Math.max(0, top - 4), behavior: 'auto' });
+    } else {
+        const containerRect = container.getBoundingClientRect();
+        const top = container.scrollTop + messageRect.top - containerRect.top;
+        container.scrollTop = Math.max(0, top - 4);
+    }
+}
+
 function clearTurn() {
     if (scrollTimer) clearTimeout(scrollTimer);
+    if (correctionTimer) clearInterval(correctionTimer);
     scrollTimer = null;
+    correctionTimer = null;
     turnStarted = false;
     settled = false;
     lastAssistantNode = null;
+    correctionCount = 0;
+}
+
+function correctLatestReply() {
+    const message = getLatestAssistant();
+    if (!message) return;
+
+    moveReplyToTop(message);
+    correctionCount += 1;
+    if (correctionCount >= 4) {
+        if (correctionTimer) clearInterval(correctionTimer);
+        correctionTimer = null;
+        settled = true;
+        lastAssistantNode = message;
+    }
 }
 
 function scrollLatestAssistantToTop() {
     scrollTimer = null;
-    const message = getLatestAssistant();
-    if (!message || !document.contains(message)) return;
-
-    message.scrollIntoView({
-        block: 'start',
-        inline: 'nearest',
-        behavior: 'auto'
-    });
-    settled = true;
-    lastAssistantNode = message;
+    correctionCount = 0;
+    correctLatestReply();
+    correctionTimer = setInterval(correctLatestReply, 1000);
 }
 
 function beginTurn(message) {
     turnStarted = true;
     settled = false;
     lastAssistantNode = message;
-
-    // TauriTavern may keep streaming or rebuild the message node. We wait
-    // independently of those DOM changes, then use the newest assistant node.
     scrollTimer = setTimeout(scrollLatestAssistantToTop, 8000);
 }
 
@@ -76,9 +115,6 @@ function poll() {
         return;
     }
 
-    // If a completed/regenerated reply is replaced by a new DOM node, allow
-    // one new delayed scroll. Normal manual scrolling keeps the same node and
-    // therefore does not retrigger anything.
     if (settled && assistant !== lastAssistantNode) {
         beginTurn(assistant);
     }
@@ -103,12 +139,15 @@ function exit() {
     if (pollTimer) clearInterval(pollTimer);
     if (retryTimer) clearTimeout(retryTimer);
     if (scrollTimer) clearTimeout(scrollTimer);
+    if (correctionTimer) clearInterval(correctionTimer);
     pollTimer = null;
     retryTimer = null;
     scrollTimer = null;
+    correctionTimer = null;
     turnStarted = false;
     settled = false;
     lastAssistantNode = null;
+    correctionCount = 0;
 }
 
 export { init, exit };
