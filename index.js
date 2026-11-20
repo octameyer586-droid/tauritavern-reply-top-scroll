@@ -119,7 +119,7 @@ function poll() {
     // or assistant content.
     if (!initialHandled) {
         initialHandled = true;
-        setTimeout(scrollInitialChatToLatest, 1000);
+        setTimeout(scrollInitialChatToLatest, 300);
     }
 
     const isUserOrSystem = latest.getAttribute('is_user') === 'true' ||
@@ -147,7 +147,7 @@ function startPolling() {
         return;
     }
 
-    pollTimer = setInterval(poll, 500);
+    pollTimer = setInterval(poll, 250);
     poll();
     console.log('[TauriTavern Reply Top Scroll] enabled');
 }
