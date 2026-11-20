@@ -1,86 +1,102 @@
 // TauriTavern-compatible implementation with no imports from SillyTavern internals.
-// Watches only until the current assistant reply settles, then disconnects.
-// This guarantees manual scrolling cannot trigger another auto-scroll.
-let chatObserver = null;
-let messageObserver = null;
-let retryTimer = null;
-let settleTimer = null;
-let observedMessage = null;
+// Polls the newest assistant reply until its text is quiet, then scrolls to its top once.
+// It never listens to scroll events, so manual scrolling cannot create an auto-scroll loop.
 
-function getLastAssistantMessage() {
+let pollTimer = null;
+let retryTimer = null;
+let currentMessage = null;
+let settledMessage = null;
+let lastFingerprint = '';
+let stableSince = 0;
+
+function getCurrentAssistantMessage() {
     const messages = [...document.querySelectorAll('#chat .mes, .mes')];
     const last = messages.at(-1);
     if (!last) return null;
-    if (last.getAttribute('is_user') === 'true' || last.getAttribute('is_system') === 'true') return null;
+
+    // If the newest message is the user's message (or a system message), do not
+    // scroll the previous assistant reply while the user is composing/sending.
+    if (last.getAttribute('is_user') === 'true' || last.getAttribute('is_system') === 'true') {
+        return null;
+    }
     return last;
 }
 
-function finishAndScroll() {
-    settleTimer = null;
-    const message = getLastAssistantMessage();
-    messageObserver?.disconnect();
-    messageObserver = null;
-
-    if (message && document.contains(message)) {
-        message.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'auto' });
-    }
+function getMessageKey(message) {
+    return message.getAttribute('mesid') || message.getAttribute('data-mesid') || message;
 }
 
-function scheduleAfterTextSettles() {
-    if (settleTimer) clearTimeout(settleTimer);
-    settleTimer = setTimeout(finishAndScroll, 1800);
-}
-
-function observeLatestMessage() {
-    const message = getLastAssistantMessage();
-    if (!message || message === observedMessage) return;
-
-    observedMessage = message;
-    messageObserver?.disconnect();
+function getFingerprint(message) {
     const text = message.querySelector('.mes_text') || message;
-    messageObserver = new MutationObserver(scheduleAfterTextSettles);
-    messageObserver.observe(text, {
-        childList: true,
-        subtree: true,
-        characterData: true
-    });
-    scheduleAfterTextSettles();
+    const value = text.textContent || '';
+    return value.length + ':' + value.slice(-160);
 }
 
-function onChatStructureChange(mutations) {
-    if (mutations.some(mutation => [...mutation.addedNodes].some(node =>
-        node instanceof Element && (node.matches('.mes') || node.querySelector('.mes'))
-    ))) {
-        observeLatestMessage();
-    }
-}
-
-function startObserver() {
-    const chat = document.getElementById('chat');
-    if (!chat) {
-        retryTimer = setTimeout(startObserver, 500);
+function pollReply() {
+    const message = getCurrentAssistantMessage();
+    if (!message) {
+        currentMessage = null;
+        lastFingerprint = '';
+        stableSince = 0;
         return;
     }
 
-    chatObserver = new MutationObserver(onChatStructureChange);
-    chatObserver.observe(chat, { childList: true, subtree: true });
+    const key = getMessageKey(message);
+    if (key !== currentMessage) {
+        currentMessage = key;
+        settledMessage = null;
+        lastFingerprint = getFingerprint(message);
+        stableSince = Date.now();
+        return;
+    }
+
+    if (key === settledMessage) return;
+
+    const fingerprint = getFingerprint(message);
+    if (fingerprint !== lastFingerprint) {
+        lastFingerprint = fingerprint;
+        stableSince = Date.now();
+        return;
+    }
+
+    // Wait for a quiet period after the last streamed text change. This lets
+    // TauriTavern finish its own automatic scroll-to-bottom first.
+    if (Date.now() - stableSince < 6000) return;
+
+    if (document.contains(message)) {
+        message.scrollIntoView({
+            block: 'start',
+            inline: 'nearest',
+            behavior: 'auto'
+        });
+        settledMessage = key;
+    }
+}
+
+function startPolling() {
+    if (!document.getElementById('chat')) {
+        retryTimer = setTimeout(startPolling, 500);
+        return;
+    }
+
+    pollTimer = setInterval(pollReply, 500);
+    pollReply();
     console.log('[TauriTavern Reply Top Scroll] enabled');
 }
 
 function init() {
-    startObserver();
+    startPolling();
 }
 
 function exit() {
-    chatObserver?.disconnect();
-    messageObserver?.disconnect();
-    chatObserver = null;
-    messageObserver = null;
+    if (pollTimer) clearInterval(pollTimer);
     if (retryTimer) clearTimeout(retryTimer);
-    if (settleTimer) clearTimeout(settleTimer);
+    pollTimer = null;
     retryTimer = null;
-    settleTimer = null;
-    observedMessage = null;
+    currentMessage = null;
+    settledMessage = null;
+    lastFingerprint = '';
+    stableSince = 0;
 }
 
 export { init, exit };
