@@ -1,6 +1,6 @@
 // TauriTavern-compatible implementation with no imports from SillyTavern internals.
-// Waits until the assistant message stops changing, then scrolls once.
-// Manual scrolling does not mutate the message text and is never intercepted.
+// Watches only until the current assistant reply settles, then disconnects.
+// This guarantees manual scrolling cannot trigger another auto-scroll.
 let chatObserver = null;
 let messageObserver = null;
 let retryTimer = null;
@@ -15,8 +15,12 @@ function getLastAssistantMessage() {
     return last;
 }
 
-function scrollToReplyTop() {
+function finishAndScroll() {
+    settleTimer = null;
     const message = getLastAssistantMessage();
+    messageObserver?.disconnect();
+    messageObserver = null;
+
     if (message && document.contains(message)) {
         message.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'auto' });
     }
@@ -24,17 +28,14 @@ function scrollToReplyTop() {
 
 function scheduleAfterTextSettles() {
     if (settleTimer) clearTimeout(settleTimer);
-    settleTimer = setTimeout(() => {
-        settleTimer = null;
-        scrollToReplyTop();
-    }, 1200);
+    settleTimer = setTimeout(finishAndScroll, 1800);
 }
 
 function observeLatestMessage() {
     const message = getLastAssistantMessage();
     if (!message || message === observedMessage) return;
-    observedMessage = message;
 
+    observedMessage = message;
     messageObserver?.disconnect();
     const text = message.querySelector('.mes_text') || message;
     messageObserver = new MutationObserver(scheduleAfterTextSettles);
@@ -43,8 +44,6 @@ function observeLatestMessage() {
         subtree: true,
         characterData: true
     });
-
-    // Allow the stream to render, then position the completed reply.
     scheduleAfterTextSettles();
 }
 
