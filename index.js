@@ -94,7 +94,9 @@ function beginTurn(message) {
     turnStarted = true;
     settled = false;
     lastAssistantNode = message;
-    scrollTimer = setTimeout(scrollLatestAssistantToTop, 8000);
+    // Three seconds gives a quick response while the correction window handles
+    // any later layout changes during streaming.
+    scrollTimer = setTimeout(scrollLatestAssistantToTop, 3000);
 }
 
 function poll() {
