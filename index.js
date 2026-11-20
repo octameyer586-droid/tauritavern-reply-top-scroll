@@ -1,52 +1,54 @@
-import { eventSource, event_types } from '../../../script.js';
+// TauriTavern-compatible implementation with no imports from SillyTavern internals.
+// It uses the stable chat DOM contract, so it also works on mobile builds.
+let observer = null;
+let pendingTimer = null;
+let lastScrolledMessage = null;
 
-const timers = new Set();
+function getLastAssistantMessage() {
+    const messages = [...document.querySelectorAll('#chat .mes, .mes')];
+    const last = messages.at(-1);
+    if (!last) return null;
+    if (last.getAttribute('is_user') === 'true' || last.getAttribute('is_system') === 'true') return null;
+    return last;
+}
 
-function findMessage(messageId) {
-    const id = Number(messageId);
-    if (Number.isInteger(id) && id >= 0) {
-        const exact = document.querySelector(`.mes[mesid="${id}"]`);
-        if (exact) return exact;
+function scrollReplyTop() {
+    const message = getLastAssistantMessage();
+    if (!message || !document.contains(message)) return;
+    message.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'auto' });
+    lastScrolledMessage = message;
+}
+
+function scheduleScroll() {
+    if (pendingTimer) clearTimeout(pendingTimer);
+    pendingTimer = setTimeout(() => {
+        pendingTimer = null;
+        scrollReplyTop();
+    }, 1400);
+}
+
+function startObserver() {
+    const chat = document.getElementById('chat');
+    if (!chat) {
+        setTimeout(startObserver, 500);
+        return;
     }
-    return [...document.querySelectorAll('#chat .mes, .mes')].at(-1) ?? null;
-}
 
-function moveToTop(messageId) {
-    const message = findMessage(messageId);
-    if (!message) return;
-
-    const move = () => {
-        if (document.contains(message)) {
-            message.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'auto' });
-        }
-    };
-
-    move();
-    for (const delay of [120, 400, 900, 1800]) {
-        const timer = setTimeout(() => {
-            timers.delete(timer);
-            move();
-        }, delay);
-        timers.add(timer);
-    }
-}
-
-function onMessageRendered(messageId) {
-    moveToTop(messageId);
-}
-
-function init() {
-    eventSource.makeLast(event_types.CHARACTER_MESSAGE_RENDERED, onMessageRendered);
-    eventSource.on(event_types.MESSAGE_RECEIVED, onMessageRendered);
-    eventSource.on(event_types.GENERATION_ENDED, () => moveToTop());
+    observer = new MutationObserver(scheduleScroll);
+    observer.observe(chat, { childList: true, subtree: true, characterData: true });
     console.log('[TauriTavern Reply Top Scroll] enabled');
 }
 
+function init() {
+    startObserver();
+}
+
 function exit() {
-    eventSource.removeListener(event_types.CHARACTER_MESSAGE_RENDERED, onMessageRendered);
-    eventSource.removeListener(event_types.MESSAGE_RECEIVED, onMessageRendered);
-    for (const timer of timers) clearTimeout(timer);
-    timers.clear();
+    observer?.disconnect();
+    observer = null;
+    if (pendingTimer) clearTimeout(pendingTimer);
+    pendingTimer = null;
+    lastScrolledMessage = null;
 }
 
 export { init, exit };
