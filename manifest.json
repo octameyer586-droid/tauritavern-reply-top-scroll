@@ -6,7 +6,8 @@
   "js": "index.js",
   "css": "style.css",
   "author": "octameyer586-droid",
-  "version": "1.0.2",
+  "version": "1.0.3",
+  "auto_update": false,
   "homePage": "https://github.com/octameyer586-droid/tauritavern-reply-top-scroll",
   "hooks": {
     "activate": "init"
