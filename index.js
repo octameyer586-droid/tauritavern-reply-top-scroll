@@ -1,9 +1,11 @@
 // TauriTavern-compatible implementation with no imports from SillyTavern internals.
-// Scrolls once when a new assistant message node is added, then never fights
-// the user's manual scrolling for that same message.
-let observer = null;
+// Waits until the assistant message stops changing, then scrolls once.
+// Manual scrolling does not mutate the message text and is never intercepted.
+let chatObserver = null;
+let messageObserver = null;
 let retryTimer = null;
-let lastHandledMessageId = null;
+let settleTimer = null;
+let observedMessage = null;
 
 function getLastAssistantMessage() {
     const messages = [...document.querySelectorAll('#chat .mes, .mes')];
@@ -13,24 +15,44 @@ function getLastAssistantMessage() {
     return last;
 }
 
-function scrollNewReplyOnce() {
+function scrollToReplyTop() {
     const message = getLastAssistantMessage();
-    if (!message || !document.contains(message)) return;
-
-    const id = message.getAttribute('mesid') ?? message;
-    if (id === lastHandledMessageId) return;
-    lastHandledMessageId = id;
-
-    message.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'auto' });
+    if (message && document.contains(message)) {
+        message.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'auto' });
+    }
 }
 
-function isMessageNode(node) {
-    return node instanceof Element && (node.matches('.mes') || node.querySelector('.mes'));
+function scheduleAfterTextSettles() {
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = setTimeout(() => {
+        settleTimer = null;
+        scrollToReplyTop();
+    }, 1200);
 }
 
-function onChatMutation(mutations) {
-    if (mutations.some(mutation => [...mutation.addedNodes].some(isMessageNode))) {
-        scrollNewReplyOnce();
+function observeLatestMessage() {
+    const message = getLastAssistantMessage();
+    if (!message || message === observedMessage) return;
+    observedMessage = message;
+
+    messageObserver?.disconnect();
+    const text = message.querySelector('.mes_text') || message;
+    messageObserver = new MutationObserver(scheduleAfterTextSettles);
+    messageObserver.observe(text, {
+        childList: true,
+        subtree: true,
+        characterData: true
+    });
+
+    // Allow the stream to render, then position the completed reply.
+    scheduleAfterTextSettles();
+}
+
+function onChatStructureChange(mutations) {
+    if (mutations.some(mutation => [...mutation.addedNodes].some(node =>
+        node instanceof Element && (node.matches('.mes') || node.querySelector('.mes'))
+    ))) {
+        observeLatestMessage();
     }
 }
 
@@ -41,8 +63,8 @@ function startObserver() {
         return;
     }
 
-    observer = new MutationObserver(onChatMutation);
-    observer.observe(chat, { childList: true, subtree: true });
+    chatObserver = new MutationObserver(onChatStructureChange);
+    chatObserver.observe(chat, { childList: true, subtree: true });
     console.log('[TauriTavern Reply Top Scroll] enabled');
 }
 
@@ -51,11 +73,15 @@ function init() {
 }
 
 function exit() {
-    observer?.disconnect();
-    observer = null;
+    chatObserver?.disconnect();
+    messageObserver?.disconnect();
+    chatObserver = null;
+    messageObserver = null;
     if (retryTimer) clearTimeout(retryTimer);
+    if (settleTimer) clearTimeout(settleTimer);
     retryTimer = null;
-    lastHandledMessageId = null;
+    settleTimer = null;
+    observedMessage = null;
 }
 
 export { init, exit };
