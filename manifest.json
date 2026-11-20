@@ -1,0 +1,14 @@
+{
+  "display_name": "TauriTavern 回复顶部滚动",
+  "loading_order": 100,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "octameyer586-droid",
+  "version": "1.0.0",
+  "homePage": "https://github.com/octameyer586-droid/tauritavern-reply-top-scroll",
+  "hooks": {
+    "activate": "init"
+  }
+}
