@@ -1,6 +1,6 @@
-// TauriTavern-compatible implementation with no imports from SillyTavern internals.
-// Locates the actual scroll container and moves it to the newest assistant reply.
-// A short correction window handles TauriTavern's final layout update, then stops.
+// TauriTavern-compatible reply positioning.
+// Native auto-scroll should be disabled so this extension is the only scroll owner.
+// It positions an already-open chat once, then handles each new assistant turn once.
 
 let pollTimer = null;
 let retryTimer = null;
@@ -8,6 +8,7 @@ let scrollTimer = null;
 let correctionTimer = null;
 let turnStarted = false;
 let settled = false;
+let initialHandled = false;
 let lastAssistantNode = null;
 let correctionCount = 0;
 
@@ -56,6 +57,12 @@ function moveReplyToTop(message) {
         const top = container.scrollTop + messageRect.top - containerRect.top;
         container.scrollTop = Math.max(0, top - 4);
     }
+
+    // Fallback for WebView layouts where the scroll owner is not exposed through
+    // computed overflow styles.
+    if (message.getBoundingClientRect().top > window.innerHeight * 0.65) {
+        message.scrollIntoView({ block: 'start', inline: 'nearest', behavior: 'auto' });
+    }
 }
 
 function clearTurn() {
@@ -90,18 +97,30 @@ function scrollLatestAssistantToTop() {
     correctionTimer = setInterval(correctLatestReply, 1000);
 }
 
-function beginTurn(message) {
+function scrollInitialChatToLatest() {
+    const message = getLatestMessage();
+    if (!message) return;
+    moveReplyToTop(message);
+}
+
+function beginTurn(message, delay = 3000) {
     turnStarted = true;
     settled = false;
     lastAssistantNode = message;
-    // Three seconds gives a quick response while the correction window handles
-    // any later layout changes during streaming.
-    scrollTimer = setTimeout(scrollLatestAssistantToTop, 3000);
+    scrollTimer = setTimeout(scrollLatestAssistantToTop, delay);
 }
 
 function poll() {
     const latest = getLatestMessage();
     if (!latest) return;
+
+    // Existing chats open at the first message by default on TauriTavern.
+    // Handle that once, independently of whether the latest message is user
+    // or assistant content.
+    if (!initialHandled) {
+        initialHandled = true;
+        setTimeout(scrollInitialChatToLatest, 1000);
+    }
 
     const isUserOrSystem = latest.getAttribute('is_user') === 'true' ||
         latest.getAttribute('is_system') === 'true';
@@ -113,12 +132,12 @@ function poll() {
 
     const assistant = latest;
     if (!turnStarted) {
-        beginTurn(assistant);
+        beginTurn(assistant, 3000);
         return;
     }
 
     if (settled && assistant !== lastAssistantNode) {
-        beginTurn(assistant);
+        beginTurn(assistant, 3000);
     }
 }
 
@@ -148,6 +167,7 @@ function exit() {
     correctionTimer = null;
     turnStarted = false;
     settled = false;
+    initialHandled = false;
     lastAssistantNode = null;
     correctionCount = 0;
 }
